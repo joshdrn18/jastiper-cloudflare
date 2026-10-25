@@ -75,7 +75,7 @@ export async function onRequestPost({ request, env }) {
             source_currency = 'MYR',
             source_promotion_price = ?,
             source_last_checked_at = ?,
-            import_status = 'lotus_test',
+            import_status = 'imported',
             updated_at = ?
           WHERE id = ?
         `).bind(
@@ -96,7 +96,7 @@ export async function onRequestPost({ request, env }) {
           ) VALUES (
             5, 5, ?, ?, ?, ?, NULL, 0,
             'available', 'draft',
-            ?, ?, ?, 'MYR', ?, ?, 'lotus_test'
+            'Lotus''s Malaysia', ?, ?, 'MYR', ?, ?, 'imported'
           )
         `).bind(
           name,
