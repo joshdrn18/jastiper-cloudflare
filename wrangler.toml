@@ -1,13 +1,12 @@
-
 name = "jastiper"
 pages_build_output_dir = "public"
 compatibility_date = "2026-10-25"
-
-[vars]
-SITE_ORIGIN = "https://jastiper-cloudflare.pages.dev/"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "jastiper-db"
 database_id = "8f924ba0-4de9-4b05-a789-bad07126826f"
 migrations_dir = "migrations"
+
+[vars]
+SITE_ORIGIN = "https://68e6ec3a.jastiper-cloudflare.pages.dev"
