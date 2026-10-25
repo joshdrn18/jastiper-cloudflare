@@ -2,24 +2,21 @@
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8" }
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
   });
 }
 
 export async function onRequestPost({ request, env }) {
-  // Ganti DB jika nama binding D1 di Pages berbeda.
-  const db = env.DB;
-  const token = env.LOTUS_IMPORT_TOKEN;
-
-  if (!db || !token) {
-    return json({
-      ok: false,
-      error: "D1 binding atau LOTUS_IMPORT_TOKEN belum disetel."
-    }, 500);
+  if (!env.DB || !env.LOTUS_IMPORT_TOKEN) {
+    return json({ ok: false, error: "Konfigurasi belum lengkap." }, 500);
   }
 
   if (
-    request.headers.get("Authorization") !== `Bearer ${token}`
+    request.headers.get("Authorization") !==
+    `Bearer ${env.LOTUS_IMPORT_TOKEN}`
   ) {
     return json({ ok: false, error: "Unauthorized" }, 401);
   }
@@ -31,71 +28,49 @@ export async function onRequestPost({ request, env }) {
     return json({ ok: false, error: "JSON tidak valid." }, 400);
   }
 
-  if (!Array.isArray(body.products) || body.products.length > 20) {
+  if (!Array.isArray(body.products) ||
+      body.products.length === 0 ||
+      body.products.length > 20) {
     return json({
       ok: false,
-      error: "Kirim maksimal 20 produk per percobaan."
+      error: "Kirim 1–20 produk per permintaan."
     }, 400);
   }
 
-  const result = {
-    ok: true,
-    received: body.products.length,
-    inserted: 0,
-    updated: 0,
-    skipped: 0,
-    errors: []
-  };
+  const result = { ok: true, inserted: 0, updated: 0, skipped: 0, errors: [] };
 
-  for (const item of body.products) {
-    const d = item.document || item;
-    const sourceId = String(d.productId || d.id || "").trim();
-    const name = String(
-      d.searchTitle?.EN || d.title || d.name || ""
-    ).trim();
+  for (const hit of body.products) {
+    const d = hit?.document || hit;
+    const id = String(d?.productId || d?.id || "").trim();
+    const name = String(d?.searchTitle?.EN || d?.title || "").trim();
 
-    if (!sourceId || !name || d.status === "inactive") {
+    if (!id || !name) {
       result.skipped++;
       continue;
     }
 
+    const price = Number(d.price);
+    const promo = Number(d.specialPrice);
+    const sourcePrice = Number.isFinite(price) ? price : null;
+    const promoPrice = Number.isFinite(promo) ? promo : null;
+    const image = d.thumbnail ||
+      (Array.isArray(d.images) ? d.images[0] : null) || null;
+    const description = d.searchDescriptionLong?.EN || null;
+    const now = new Date().toISOString();
+
     try {
-      const existing = await db.prepare(`
+      const existing = await env.DB.prepare(`
         SELECT id FROM products
         WHERE source_name = ? AND source_product_id = ?
         LIMIT 1
-      `).bind("Lotus's Malaysia", sourceId).first();
-
-      const image =
-        d.thumbnail ||
-        (Array.isArray(d.images) ? d.images[0] : null) ||
-        null;
-
-      const description =
-        typeof d.searchDescriptionLong?.EN === "string"
-          ? d.searchDescriptionLong.EN
-          : null;
-
-      const sourcePrice =
-        Number.isFinite(Number(d.price)) ? Number(d.price) : null;
-
-      const promoPrice =
-        Number.isFinite(Number(d.specialPrice))
-          ? Number(d.specialPrice)
-          : null;
-
-      const now = new Date().toISOString();
-      const slug = `lotus-${sourceId}`;
+      `).bind("Lotus's Malaysia", id).first();
 
       if (existing) {
-        // Perbarui data sumber saja. Jangan ubah harga jual,
-        // stok, atau status publikasi JASTIPER.
-        await db.prepare(`
+        await env.DB.prepare(`
           UPDATE products SET
             name = ?,
             description = ?,
             image_url = ?,
-            source_product_url = ?,
             source_price = ?,
             source_currency = 'MYR',
             source_promotion_price = ?,
@@ -104,51 +79,32 @@ export async function onRequestPost({ request, env }) {
             updated_at = ?
           WHERE id = ?
         `).bind(
-          name,
-          description,
-          image,
-          null,
-          sourcePrice,
-          promoPrice,
-          now,
-          now,
-          existing.id
+          name, description, image, sourcePrice,
+          promoPrice, now, now, existing.id
         ).run();
 
         result.updated++;
       } else {
-        await db.prepare(`
+        await env.DB.prepare(`
           INSERT INTO products (
-            category_id,
-            product_type_id,
-            name,
-            slug,
-            description,
-            image_url,
-            price,
-            stock,
-            availability_status,
-            publication_status,
-            source_name,
-            source_product_url,
-            source_product_id,
-            source_price,
-            source_currency,
-            source_promotion_price,
-            source_last_checked_at,
-            import_status
+            category_id, product_type_id, name, slug,
+            description, image_url, price, stock,
+            availability_status, publication_status,
+            source_name, source_product_id, source_price,
+            source_currency, source_promotion_price,
+            source_last_checked_at, import_status
           ) VALUES (
             5, 5, ?, ?, ?, ?, NULL, 0,
-            'available', 'draft', ?, NULL, ?, ?,
-            'MYR', ?, ?, 'lotus_test'
+            'available', 'draft',
+            ?, ?, ?, 'MYR', ?, ?, 'lotus_test'
           )
         `).bind(
           name,
-          slug,
+          `lotus-${id}`,
           description,
           image,
           "Lotus's Malaysia",
-          sourceId,
+          id,
           sourcePrice,
           promoPrice,
           now
@@ -158,9 +114,8 @@ export async function onRequestPost({ request, env }) {
       }
     } catch (error) {
       result.errors.push({
-        sourceId,
-        name,
-        error: String(error.message || error).slice(0, 250)
+        id,
+        message: String(error.message || error).slice(0, 200)
       });
     }
   }
