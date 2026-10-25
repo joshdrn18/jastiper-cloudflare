@@ -66,51 +66,81 @@ export async function onRequestPost({ request, env }) {
       `).bind("Lotus's Malaysia", id).first();
 
       if (existing) {
-        await env.DB.prepare(`
-          UPDATE products SET
-            name = ?,
-            description = ?,
-            image_url = ?,
-            source_price = ?,
-            source_currency = 'MYR',
-            source_promotion_price = ?,
-            source_last_checked_at = ?,
-            import_status = 'imported',
-            updated_at = ?
-          WHERE id = ?
-        `).bind(
-          name, description, image, sourcePrice,
-          promoPrice, now, now, existing.id
-        ).run();
+        
+const updateSql = `
+  UPDATE products SET
+    name = ?,
+    description = ?,
+    image_url = ?,
+    source_price = ?,
+    source_currency = ?,
+    source_promotion_price = ?,
+    source_last_checked_at = ?,
+    import_status = ?,
+    updated_at = ?
+  WHERE id = ?
+`;
 
-        result.updated++;
+await env.DB.prepare(updateSql).bind(
+  name,
+  description,
+  image,
+  sourcePrice,
+  "MYR",
+  promoPrice,
+  now,
+  "imported",
+  now,
+  existing.id
+).run();
+
+result.updated++;
       } else {
-        await env.DB.prepare(`
-          INSERT INTO products (
-            category_id, product_type_id, name, slug,
-            description, image_url, price, stock,
-            availability_status, publication_status,
-            source_name, source_product_id, source_price,
-            source_currency, source_promotion_price,
-            source_last_checked_at, import_status
-          ) VALUES (
-            5, 5, ?, ?, ?, ?, NULL, 0,
-            'available', 'draft',
-            'Lotus''s Malaysia', ?, ?, 'MYR', ?, ?, 'imported'
-          )
-        `).bind(
-          name,
-          `lotus-${id}`,
-          description,
-          image,
-          "Lotus's Malaysia",
-          id,
-          sourcePrice,
-          promoPrice,
-          now
-        ).run();
+          
+const insertSql = `
+  INSERT INTO products (
+    category_id,
+    product_type_id,
+    name,
+    slug,
+    description,
+    image_url,
+    price,
+    stock,
+    availability_status,
+    publication_status,
+    source_name,
+    source_product_id,
+    source_price,
+    source_currency,
+    source_promotion_price,
+    source_last_checked_at,
+    import_status
+  ) VALUES (
+    ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?
+  )
+`;
 
-        result.inserted++;
+await env.DB.prepare(insertSql).bind(
+  5,                       // category_id
+  5,                       // product_type_id: susu
+  name,
+  `lotus-${id}`,
+  description,
+  image,
+  "available",
+  "draft",
+  "Lotus's Malaysia",
+  id,
+  sourcePrice,
+  "MYR",
+  promoPrice,
+  now,
+  "imported"
+).run();
+
+result.inserted++;
+
       }
     } catch (error) {
       result.errors.push({
