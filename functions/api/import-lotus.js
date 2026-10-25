@@ -11,7 +11,10 @@ function json(data, status = 200) {
 
 export async function onRequestPost({ request, env }) {
   if (!env.DB || !env.LOTUS_IMPORT_TOKEN) {
-    return json({ ok: false, error: "Konfigurasi belum lengkap." }, 500);
+    return json({
+      ok: false,
+      error: "Konfigurasi DB atau token belum tersedia."
+    }, 500);
   }
 
   if (
@@ -28,119 +31,133 @@ export async function onRequestPost({ request, env }) {
     return json({ ok: false, error: "JSON tidak valid." }, 400);
   }
 
-  if (!Array.isArray(body.products) ||
-      body.products.length === 0 ||
-      body.products.length > 20) {
+  if (
+    !Array.isArray(body.products) ||
+    body.products.length < 1 ||
+    body.products.length > 20
+  ) {
     return json({
       ok: false,
       error: "Kirim 1–20 produk per permintaan."
     }, 400);
   }
 
-  const result = { ok: true, inserted: 0, updated: 0, skipped: 0, errors: [] };
+  const result = {
+    ok: true,
+    inserted: 0,
+    updated: 0,
+    skipped: 0,
+    errors: []
+  };
 
   for (const hit of body.products) {
     const d = hit?.document || hit;
     const id = String(d?.productId || d?.id || "").trim();
-    const name = String(d?.searchTitle?.EN || d?.title || "").trim();
+    const name = String(
+      d?.searchTitle?.EN || d?.title || d?.name || ""
+    ).trim();
 
     if (!id || !name) {
       result.skipped++;
       continue;
     }
 
-    const price = Number(d.price);
-    const promo = Number(d.specialPrice);
-    const sourcePrice = Number.isFinite(price) ? price : null;
-    const promoPrice = Number.isFinite(promo) ? promo : null;
-    const image = d.thumbnail ||
-      (Array.isArray(d.images) ? d.images[0] : null) || null;
-    const description = d.searchDescriptionLong?.EN || null;
+    const rawPrice = Number(d.price);
+    const rawPromo = Number(d.specialPrice);
+
+    const sourcePrice =
+      d.price != null && Number.isFinite(rawPrice)
+        ? Math.round(rawPrice * 100)
+        : null;
+
+    const promoPrice =
+      d.specialPrice != null && Number.isFinite(rawPromo)
+        ? Math.round(rawPromo * 100)
+        : null;
+
+    const image =
+      d.thumbnail ||
+      (Array.isArray(d.images) ? d.images[0] : null) ||
+      null;
+
+    const description =
+      d.searchDescriptionLong?.EN || null;
+
     const now = new Date().toISOString();
 
     try {
       const existing = await env.DB.prepare(`
-        SELECT id FROM products
-        WHERE source_name = ? AND source_product_id = ?
+        SELECT id
+        FROM products
+        WHERE source_name = ?
+          AND source_product_id = ?
         LIMIT 1
       `).bind("Lotus's Malaysia", id).first();
 
       if (existing) {
-        
-const updateSql = `
-  UPDATE products SET
-    name = ?,
-    description = ?,
-    image_url = ?,
-    source_price = ?,
-    source_currency = ?,
-    source_promotion_price = ?,
-    source_last_checked_at = ?,
-    import_status = ?,
-    updated_at = ?
-  WHERE id = ?
-`;
+        await env.DB.prepare(`
+          UPDATE products SET
+            name = ?,
+            description = ?,
+            image_url = ?,
+            source_price = ?,
+            source_currency = 'MYR',
+            source_promotion_price = ?,
+            source_last_checked_at = ?,
+            import_status = 'imported',
+            updated_at = ?
+          WHERE id = ?
+        `).bind(
+          name,
+          description,
+          image,
+          sourcePrice,
+          promoPrice,
+          now,
+          now,
+          existing.id
+        ).run();
 
-await env.DB.prepare(updateSql).bind(
-  name,
-  description,
-  image,
-  sourcePrice,
-  "MYR",
-  promoPrice,
-  now,
-  "imported",
-  now,
-  existing.id
-).run();
-
-result.updated++;
+        result.updated++;
       } else {
-          
-const insertSql = `
-  INSERT INTO products (
-    category_id,
-    product_type_id,
-    name,
-    slug,
-    description,
-    image_url,
-    price,
-    stock,
-    availability_status,
-    publication_status,
-    source_name,
-    source_product_id,
-    source_price,
-    source_currency,
-    source_promotion_price,
-    source_last_checked_at,
-    import_status
-  ) VALUES (
-    ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?
-  )
-`;
+        await env.DB.prepare(`
+          INSERT INTO products (
+            category_id,
+            product_type_id,
+            name,
+            slug,
+            description,
+            image_url,
+            price,
+            stock,
+            availability_status,
+            publication_status,
+            source_name,
+            source_product_url,
+            source_product_id,
+            source_price,
+            source_currency,
+            source_promotion_price,
+            source_last_checked_at,
+            import_status
+          ) VALUES (
+            5, 5, ?, ?, ?, ?, NULL, 0,
+            'available', 'draft',
+            ?, NULL, ?, ?, 'MYR', ?, ?, 'imported'
+          )
+        `).bind(
+          name,
+          `lotus-${id}`,
+          description,
+          image,
+          "Lotus's Malaysia",
+          id,
+          sourcePrice,
+          promoPrice,
+          now
+        ).run();
 
-await env.DB.prepare(insertSql).bind(
-  5,                       // category_id
-  5,                       // product_type_id: susu
-  name,
-  `lotus-${id}`,
-  description,
-  image,
-  "available",
-  "draft",
-  "Lotus's Malaysia",
-  id,
-  sourcePrice,
-  "MYR",
-  promoPrice,
-  now,
-  "imported"
-).run();
-
-result.inserted++;
-
+        result.inserted++;
       }
     } catch (error) {
       result.errors.push({
